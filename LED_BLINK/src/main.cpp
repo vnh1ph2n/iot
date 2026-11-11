@@ -7,65 +7,85 @@
 
 Adafruit_NeoPixel pixels(NUM_PIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
-volatile uint32_t toggle_count = 0;
+QueueHandle_t ledQueue;
 
-void task_led_blinky(void *pvParameters) {
+typedef struct {
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+} LedCommand_t;
+
+void task_sender(void *pvParameters) {
     pinMode(LED_PIN, OUTPUT);
+    uint32_t state_count = 0;
 
     while (1) {
         digitalWrite(LED_PIN, HIGH);
-        toggle_count++;
-        Serial.printf("[Task LED] ON  | Toggle Count: %d\n", toggle_count);
+        state_count++;
+
+        LedCommand_t command;
+        uint32_t mode = state_count % 3;
+
+        if (mode == 1) {
+            command = {255, 0, 0};
+        } else if (mode == 2) {
+            command = {0, 255, 0};
+        } else {
+            command = {0, 0, 255};
+        }
+
+        xQueueSend(ledQueue, &command, portMAX_DELAY);
+        Serial.printf("[Task Sender] LED D13 ON | Sent Color Mode: %d\n", mode);
         vTaskDelay(pdMS_TO_TICKS(1000));
 
         digitalWrite(LED_PIN, LOW);
-        Serial.println("[Task LED] OFF");
+        Serial.println("[Task Sender] LED D13 OFF");
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
-void task_neopixel(void *pvParameters) {
+void task_receiver(void *pvParameters) {
     pixels.begin();
     pixels.setBrightness(30);
 
+    LedCommand_t receivedCommand;
+
     while (1) {
-        uint32_t mode = toggle_count % 3;
-
-        if (mode == 1) {
-            pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-        } else if (mode == 2) {
-            pixels.setPixelColor(0, pixels.Color(0, 255, 0));
-        } else {
-            pixels.setPixelColor(0, pixels.Color(0, 0, 255));
+        if (xQueueReceive(ledQueue, &receivedCommand, portMAX_DELAY) == pdTRUE) {
+            pixels.setPixelColor(0, pixels.Color(receivedCommand.red, receivedCommand.green, receivedCommand.blue));
+            pixels.show();
+            Serial.printf("[Task Receiver] Received Color -> R:%d G:%d B:%d\n", 
+                          receivedCommand.red, receivedCommand.green, receivedCommand.blue);
         }
-
-        pixels.show();
-        vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
 
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    Serial.println("\n=== LAB 2 - BÀI TẬP 2: FREERTOS SHARED VARIABLES ===");
+    Serial.println("\n=== LAB 2 - BÀI TẬP 3: FREERTOS QUEUE COMMUNICATION ===");
 
-    xTaskCreate(
-        task_led_blinky,
-        "task_led_blinky",
-        2048,
-        NULL,
-        1,
-        NULL
-    );
+    ledQueue = xQueueCreate(5, sizeof(LedCommand_t));
 
-    xTaskCreate(
-        task_neopixel,
-        "task_neopixel",
-        2048,
-        NULL,
-        1,
-        NULL
-    );
+    if (ledQueue != NULL) {
+        xTaskCreate(
+            task_sender,
+            "task_sender",
+            2048,
+            NULL,
+            1,
+            NULL
+        );
+
+        xTaskCreate(
+            task_receiver,
+            "task_receiver",
+            2048,
+            NULL,
+            1,
+            NULL
+        );
+    }
 }
 
 void loop() {
