@@ -14,23 +14,24 @@ typedef struct {
     uint8_t green;
     uint8_t blue;
     uint16_t delay_ms;
-} LedCommand_t;
+    uint8_t priority_level;
+} PriorityCommand_t;
 
-void task_sender_1(void *pvParameters) {
+void task_low_priority_sender(void *pvParameters) {
     while (1) {
-        LedCommand_t command = {255, 0, 0, 500};
-        xQueueSend(ledQueue, &command, portMAX_DELAY);
-        Serial.println("[Sender 1] Sent RED command (500ms)");
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        PriorityCommand_t command = {0, 0, 255, 300, 1};
+        xQueueSendToBack(ledQueue, &command, portMAX_DELAY);
+        Serial.println("[Sender LOW] Sent BLUE command to BACK of queue");
+        vTaskDelay(pdMS_TO_TICKS(2500));
     }
 }
 
-void task_sender_2(void *pvParameters) {
+void task_high_priority_sender(void *pvParameters) {
     while (1) {
-        LedCommand_t command = {0, 255, 0, 200};
-        xQueueSend(ledQueue, &command, portMAX_DELAY);
-        Serial.println("[Sender 2] Sent GREEN command (200ms)");
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        PriorityCommand_t command = {255, 0, 0, 1000, 2};
+        xQueueSendToFront(ledQueue, &command, portMAX_DELAY);
+        Serial.println("[Sender HIGH] Sent RED OVERRIDE command to FRONT of queue");
+        vTaskDelay(pdMS_TO_TICKS(4000));
     }
 }
 
@@ -39,7 +40,7 @@ void task_receiver(void *pvParameters) {
     pixels.begin();
     pixels.setBrightness(30);
 
-    LedCommand_t receivedCommand;
+    PriorityCommand_t receivedCommand;
 
     while (1) {
         if (xQueueReceive(ledQueue, &receivedCommand, portMAX_DELAY) == pdTRUE) {
@@ -47,8 +48,10 @@ void task_receiver(void *pvParameters) {
             pixels.setPixelColor(0, pixels.Color(receivedCommand.red, receivedCommand.green, receivedCommand.blue));
             pixels.show();
 
-            Serial.printf("[Receiver] Executing -> R:%d G:%d B:%d | Delay:%d ms\n",
-                          receivedCommand.red, receivedCommand.green, receivedCommand.blue, receivedCommand.delay_ms);
+            Serial.printf("[Receiver] Processing Priority %d -> R:%d G:%d B:%d | Duration:%d ms\n",
+                          receivedCommand.priority_level,
+                          receivedCommand.red, receivedCommand.green, receivedCommand.blue,
+                          receivedCommand.delay_ms);
 
             vTaskDelay(pdMS_TO_TICKS(receivedCommand.delay_ms));
 
@@ -62,14 +65,14 @@ void task_receiver(void *pvParameters) {
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    Serial.println("\n=== LAB 2 - BÀI TẬP 4: MULTI-SENDER QUEUE ===");
+    Serial.println("\n=== LAB 2 - BÀI TẬP 5: QUEUE OVERWRITE & FRONT INSERTION ===");
 
-    ledQueue = xQueueCreate(10, sizeof(LedCommand_t));
+    ledQueue = xQueueCreate(5, sizeof(PriorityCommand_t));
 
     if (ledQueue != NULL) {
         xTaskCreate(
-            task_sender_1,
-            "task_sender_1",
+            task_low_priority_sender,
+            "task_low_sender",
             2048,
             NULL,
             1,
@@ -77,8 +80,8 @@ void setup() {
         );
 
         xTaskCreate(
-            task_sender_2,
-            "task_sender_2",
+            task_high_priority_sender,
+            "task_high_sender",
             2048,
             NULL,
             1,
