@@ -13,38 +13,29 @@ typedef struct {
     uint8_t red;
     uint8_t green;
     uint8_t blue;
+    uint16_t delay_ms;
 } LedCommand_t;
 
-void task_sender(void *pvParameters) {
-    pinMode(LED_PIN, OUTPUT);
-    uint32_t state_count = 0;
-
+void task_sender_1(void *pvParameters) {
     while (1) {
-        digitalWrite(LED_PIN, HIGH);
-        state_count++;
-
-        LedCommand_t command;
-        uint32_t mode = state_count % 3;
-
-        if (mode == 1) {
-            command = {255, 0, 0};
-        } else if (mode == 2) {
-            command = {0, 255, 0};
-        } else {
-            command = {0, 0, 255};
-        }
-
+        LedCommand_t command = {255, 0, 0, 500};
         xQueueSend(ledQueue, &command, portMAX_DELAY);
-        Serial.printf("[Task Sender] LED D13 ON | Sent Color Mode: %d\n", mode);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        Serial.println("[Sender 1] Sent RED command (500ms)");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+    }
+}
 
-        digitalWrite(LED_PIN, LOW);
-        Serial.println("[Task Sender] LED D13 OFF");
-        vTaskDelay(pdMS_TO_TICKS(1000));
+void task_sender_2(void *pvParameters) {
+    while (1) {
+        LedCommand_t command = {0, 255, 0, 200};
+        xQueueSend(ledQueue, &command, portMAX_DELAY);
+        Serial.println("[Sender 2] Sent GREEN command (200ms)");
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
 
 void task_receiver(void *pvParameters) {
+    pinMode(LED_PIN, OUTPUT);
     pixels.begin();
     pixels.setBrightness(30);
 
@@ -52,10 +43,18 @@ void task_receiver(void *pvParameters) {
 
     while (1) {
         if (xQueueReceive(ledQueue, &receivedCommand, portMAX_DELAY) == pdTRUE) {
+            digitalWrite(LED_PIN, HIGH);
             pixels.setPixelColor(0, pixels.Color(receivedCommand.red, receivedCommand.green, receivedCommand.blue));
             pixels.show();
-            Serial.printf("[Task Receiver] Received Color -> R:%d G:%d B:%d\n", 
-                          receivedCommand.red, receivedCommand.green, receivedCommand.blue);
+
+            Serial.printf("[Receiver] Executing -> R:%d G:%d B:%d | Delay:%d ms\n",
+                          receivedCommand.red, receivedCommand.green, receivedCommand.blue, receivedCommand.delay_ms);
+
+            vTaskDelay(pdMS_TO_TICKS(receivedCommand.delay_ms));
+
+            digitalWrite(LED_PIN, LOW);
+            pixels.setPixelColor(0, pixels.Color(0, 0, 0));
+            pixels.show();
         }
     }
 }
@@ -63,14 +62,23 @@ void task_receiver(void *pvParameters) {
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    Serial.println("\n=== LAB 2 - BÀI TẬP 3: FREERTOS QUEUE COMMUNICATION ===");
+    Serial.println("\n=== LAB 2 - BÀI TẬP 4: MULTI-SENDER QUEUE ===");
 
-    ledQueue = xQueueCreate(5, sizeof(LedCommand_t));
+    ledQueue = xQueueCreate(10, sizeof(LedCommand_t));
 
     if (ledQueue != NULL) {
         xTaskCreate(
-            task_sender,
-            "task_sender",
+            task_sender_1,
+            "task_sender_1",
+            2048,
+            NULL,
+            1,
+            NULL
+        );
+
+        xTaskCreate(
+            task_sender_2,
+            "task_sender_2",
             2048,
             NULL,
             1,
@@ -82,7 +90,7 @@ void setup() {
             "task_receiver",
             2048,
             NULL,
-            1,
+            2,
             NULL
         );
     }
